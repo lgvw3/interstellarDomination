@@ -1,13 +1,18 @@
 "use client";
 
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Line, Sphere, Stars } from "@react-three/drei";
-import { Suspense, useRef, useEffect } from "react";
+import { Suspense, useRef, useEffect, useState } from "react";
 import * as THREE from "three";
+import { moveFleet } from "@/lib/actions";
 
 export default function GalaxyMap({ map, players, currentTurn }: { map: { systems: any[]; wormholes: any[]; asteroids: any[] }; players: any[]; currentTurn: string }) {
   const cameraRef = useRef<THREE.PerspectiveCamera>(null!);
   const moveState = useRef({ forward: false, backward: false, left: false, right: false });
+  const [selectedSystem, setSelectedSystem] = useState<string | null>(null);
+  const player = players.find((p) => p.id === currentTurn);
+  const raycaster = useRef(new THREE.Raycaster());
+  const mouse = useRef(new THREE.Vector2(0, 0)); // Center of screen
 
   // Start camera near player's home system
   const homeSystem = map.systems.find((s) => s.owner === currentTurn);
@@ -15,28 +20,23 @@ export default function GalaxyMap({ map, players, currentTurn }: { map: { system
     ? [homeSystem.position[0], homeSystem.position[1] + 10, homeSystem.position[2] + 10]
     : [0, 10, 10];
 
-  // Mouse look with quaternions
+  // Mouse look
   const handleMouseMove = (e: MouseEvent) => {
     if (!cameraRef.current || !document.pointerLockElement) return;
     const sensitivity = 0.002;
-
-    // Yaw (around world Y-axis)
     const yawQuaternion = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -e.movementX * sensitivity);
     cameraRef.current.quaternion.multiplyQuaternions(yawQuaternion, cameraRef.current.quaternion);
-
-    // Pitch (around local X-axis)
-    const rightAxis = new THREE.Vector3(1, 0, 0).applyQuaternion(cameraRef.current.quaternion); // Camera's local right
+    const rightAxis = new THREE.Vector3(1, 0, 0).applyQuaternion(cameraRef.current.quaternion);
     const pitchQuaternion = new THREE.Quaternion().setFromAxisAngle(rightAxis, -e.movementY * sensitivity);
     cameraRef.current.quaternion.multiplyQuaternions(pitchQuaternion, cameraRef.current.quaternion);
-
-    // Optional: Normalize quaternion to prevent drift (usually not needed with small steps)
     cameraRef.current.quaternion.normalize();
   };
 
-  // Lock pointer on click
-  const handleCanvasClick = () => {
+  // Lock pointer and interact
+  const handleCanvasClick = (e: MouseEvent, scene: THREE.Scene) => {
     const canvas = document.querySelector("canvas");
-    if (canvas) canvas.requestPointerLock();
+    if (canvas && !document.pointerLockElement) canvas.requestPointerLock();
+    if (document.pointerLockElement) handleInteract(scene); // Left-click to interact
   };
 
   // WASD movement
@@ -70,25 +70,45 @@ export default function GalaxyMap({ map, players, currentTurn }: { map: { system
     };
   }, []);
 
+  // Handle system interaction
+  const handleInteract = (scene: THREE.Scene) => {
+    if (!cameraRef.current || !player) return;
+    raycaster.current.setFromCamera(mouse.current, cameraRef.current);
+    const intersects = raycaster.current.intersectObjects(scene.children, true);
+    const system = intersects.find((i) => i.object.parent?.userData.id)?.object.parent;
+    if (system) {
+      const systemId = system.userData.id as string;
+      if (player.systems.includes(systemId)) {
+        setSelectedSystem(systemId); // Select owned system
+      } else if (selectedSystem) {
+        moveFleet("game1741079847886", currentTurn, selectedSystem, systemId, 2).then((result) => { // Hardcode gameId
+          if (result.success) setSelectedSystem(null);
+        });
+      }
+    }
+  };
+
   // Scene with movement and rendering
   function GalaxyScene() {
+    const { scene } = useThree();
+
     useFrame(() => {
       if (!cameraRef.current) return;
-      const speed = 1.0; // Speed for larger map
+      const speed = 1.0;
       const direction = new THREE.Vector3();
-
-      // Forward/backward
       if (moveState.current.forward) direction.z = -1;
       if (moveState.current.backward) direction.z = 1;
-
-      // Strafe left/right
       if (moveState.current.left) direction.x = -1;
       if (moveState.current.right) direction.x = 1;
-
-      // Normalize and apply camera orientation
       direction.normalize().applyQuaternion(cameraRef.current.quaternion);
       cameraRef.current.position.add(direction.multiplyScalar(speed));
     });
+
+    useEffect(() => {
+      const handleClickWithScene = (e: MouseEvent) => handleCanvasClick(e, scene);
+      window.addEventListener("click", handleClickWithScene);
+      return () => window.removeEventListener("click", handleClickWithScene);
+    }, [scene]);
 
     function Planet({ size, distance, color, systemPosition }: { size: number; distance: number; color: string; systemPosition: [number, number, number] }) {
       const ref = useRef<THREE.Mesh>(null!);
@@ -107,16 +127,23 @@ export default function GalaxyMap({ map, players, currentTurn }: { map: { system
     }
 
     function SolarSystem({
-      position, sunSize, planets,
-    }: { position: [number, number, number]; sunSize: number; planets: any[] }) {
+      position, sunSize, planets, id, owner, fleets,
+    }: { position: [number, number, number]; sunSize: number; planets: any[]; id: string; owner: string | null; fleets?: number }) {
+      const ref = useRef<THREE.Group>(null!);
       return (
-        <group position={position}>
+        <group ref={ref} position={position} userData={{ id }}>
           <Sphere args={[sunSize, 32, 32]}>
-            <meshStandardMaterial color="yellow" emissive="orange" emissiveIntensity={0.5} />
+            <meshStandardMaterial color={owner ? "red" : "yellow"} emissive="orange" emissiveIntensity={0.5} />
           </Sphere>
           {planets.map((p) => (
             <Planet key={p.id} size={p.size} distance={p.distance} color={p.color} systemPosition={[0, 0, 0]} />
           ))}
+          {fleets && (
+            <mesh position={[0, sunSize + 0.5, 0]}>
+              <sphereGeometry args={[0.3, 16, 16]} />
+              <meshStandardMaterial color="white" emissive="white" emissiveIntensity={1} />
+            </mesh>
+          )}
         </group>
       );
     }
@@ -127,15 +154,7 @@ export default function GalaxyMap({ map, players, currentTurn }: { map: { system
         ref.current.material.dashOffset -= 0.05;
       });
       return (
-        <Line
-          ref={ref}
-          points={[start, end]}
-          color="cyan"
-          lineWidth={2}
-          dashed
-          dashSize={0.5}
-          gapSize={0.5}
-        />
+        <Line ref={ref} points={[start, end]} color="cyan" lineWidth={2} dashed dashSize={0.5} gapSize={0.5} />
       );
     }
 
@@ -162,16 +181,17 @@ export default function GalaxyMap({ map, players, currentTurn }: { map: { system
         {map.systems.map((system) => (
           <SolarSystem
             key={system.id}
+            id={system.id}
             position={system.position}
             sunSize={system.sunSize}
             planets={system.planets}
+            owner={system.owner}
+            fleets={player?.fleets?.[system.id]}
           />
         ))}
-        {map.wormholes.map((wh, i) => {
-          const start = map.systems.find((s) => s.id === wh.from).position;
-          const end = map.systems.find((s) => s.id === wh.to).position;
-          return <Wormhole key={i} start={start} end={end} />;
-  })}
+        {map.wormholes.map((wh, i) => (
+          <Wormhole key={i} start={map.systems.find((s) => s.id === wh.from).position} end={map.systems.find((s) => s.id === wh.to).position} />
+        ))}
         {map.asteroids.map((asteroid) => (
           <Asteroid key={asteroid.id} position={asteroid.position} size={asteroid.size} />
         ))}
@@ -187,10 +207,15 @@ export default function GalaxyMap({ map, players, currentTurn }: { map: { system
           cameraRef.current = camera;
           if (homeSystem) camera.lookAt(homeSystem.position[0], homeSystem.position[1], homeSystem.position[2]);
         }}
-        onClick={handleCanvasClick}
       >
         <GalaxyScene />
       </Canvas>
+      <div className="absolute top-1/2 left-1/2 w-4 h-4 bg-white rounded-full transform -translate-x-1/2 -translate-y-1/2 opacity-50 pointer-events-none" /> {/* Crosshair */}
+      {selectedSystem && (
+        <div className="absolute top-4 left-4 p-2 bg-gray-800 text-white rounded">
+          Selected: {selectedSystem}
+        </div>
+      )}
     </Suspense>
   );
 }
