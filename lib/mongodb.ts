@@ -12,7 +12,7 @@ if (process.env.NODE_ENV === "development") {
     const globalWithMongo = global as typeof globalThis & {
         _mongoClientPromise?: Promise<MongoClient>;
     };
-    
+
     if (!globalWithMongo._mongoClientPromise) {
         client = new MongoClient(uri);
         globalWithMongo._mongoClientPromise = client.connect();

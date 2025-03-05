@@ -7,7 +7,7 @@ export default async function GamePage({ params }: { params: { id: string } }) {
 
   return (
     <div className="h-screen w-screen">
-      <GalaxyMap map={game.map} players={game.players} currentTurn={game.current_turn} gameId={params.id} />
+      <GalaxyMap map={game.map} players={game.players} currentTurn={game.currentTurn} gameId={params.id} />
     </div>
   );
 }

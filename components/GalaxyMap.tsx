@@ -5,12 +5,20 @@ import { Line, Sphere, Stars } from "@react-three/drei";
 import { Suspense, useRef, useEffect, useState } from "react";
 import * as THREE from "three";
 import { moveFleet } from "@/lib/actions";
+import { GameMap, MovingFleet, Player } from "@/lib/types";
 
-export default function GalaxyMap({ map, players, currentTurn, gameId }: { map: { systems: any[]; wormholes: any[]; asteroids: any[] }; players: any[]; currentTurn: string; gameId: string }) {
+interface GalaxyMapProps {
+  map: GameMap;
+  players: Player[];
+  currentTurn: string;
+  gameId: string;
+}
+
+export default function GalaxyMap({ map, players, currentTurn, gameId }: GalaxyMapProps) {
   const cameraRef = useRef<THREE.PerspectiveCamera>(null!);
   const moveState = useRef({ forward: false, backward: false, left: false, right: false });
   const [selectedSystem, setSelectedSystem] = useState<string | null>(null);
-  const [movingFleets, setMovingFleets] = useState<{ sourceId: string; targetId: string; count: number; progress: number }[]>([]);
+  const [movingFleets, setMovingFleets] = useState<MovingFleet[]>([]);
   const player = players.find((p) => p.id === currentTurn);
   const raycaster = useRef(new THREE.Raycaster());
   const mouse = useRef(new THREE.Vector2(0, 0));
