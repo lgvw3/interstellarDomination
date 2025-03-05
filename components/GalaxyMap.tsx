@@ -6,21 +6,20 @@ import { Suspense, useRef, useEffect, useState } from "react";
 import * as THREE from "three";
 import { moveFleet } from "@/lib/actions";
 
-export default function GalaxyMap({ map, players, currentTurn }: { map: { systems: any[]; wormholes: any[]; asteroids: any[] }; players: any[]; currentTurn: string }) {
+export default function GalaxyMap({ map, players, currentTurn, gameId }: { map: { systems: any[]; wormholes: any[]; asteroids: any[] }; players: any[]; currentTurn: string; gameId: string }) {
   const cameraRef = useRef<THREE.PerspectiveCamera>(null!);
   const moveState = useRef({ forward: false, backward: false, left: false, right: false });
   const [selectedSystem, setSelectedSystem] = useState<string | null>(null);
+  const [movingFleets, setMovingFleets] = useState<{ sourceId: string; targetId: string; count: number; progress: number }[]>([]);
   const player = players.find((p) => p.id === currentTurn);
   const raycaster = useRef(new THREE.Raycaster());
-  const mouse = useRef(new THREE.Vector2(0, 0)); // Center of screen
+  const mouse = useRef(new THREE.Vector2(0, 0));
 
-  // Start camera near player's home system
   const homeSystem = map.systems.find((s) => s.owner === currentTurn);
   const initialPosition: [number, number, number] = homeSystem
     ? [homeSystem.position[0], homeSystem.position[1] + 10, homeSystem.position[2] + 10]
     : [0, 10, 10];
 
-  // Mouse look
   const handleMouseMove = (e: MouseEvent) => {
     if (!cameraRef.current || !document.pointerLockElement) return;
     const sensitivity = 0.002;
@@ -32,14 +31,12 @@ export default function GalaxyMap({ map, players, currentTurn }: { map: { system
     cameraRef.current.quaternion.normalize();
   };
 
-  // Lock pointer and interact
   const handleCanvasClick = (e: MouseEvent, scene: THREE.Scene) => {
     const canvas = document.querySelector("canvas");
     if (canvas && !document.pointerLockElement) canvas.requestPointerLock();
-    if (document.pointerLockElement) handleInteract(scene); // Left-click to interact
+    if (document.pointerLockElement) handleInteract(scene);
   };
 
-  // WASD movement
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       switch (e.key.toLowerCase()) {
@@ -70,7 +67,6 @@ export default function GalaxyMap({ map, players, currentTurn }: { map: { system
     };
   }, []);
 
-  // Handle system interaction
   const handleInteract = (scene: THREE.Scene) => {
     if (!cameraRef.current || !player) return;
     raycaster.current.setFromCamera(mouse.current, cameraRef.current);
@@ -79,20 +75,25 @@ export default function GalaxyMap({ map, players, currentTurn }: { map: { system
     if (system) {
       const systemId = system.userData.id as string;
       if (player.systems.includes(systemId)) {
-        setSelectedSystem(systemId); // Select owned system
+        setSelectedSystem(systemId);
       } else if (selectedSystem) {
-        moveFleet("game1741079847886", currentTurn, selectedSystem, systemId, 2).then((result) => { // Hardcode gameId
-          if (result.success) setSelectedSystem(null);
+        moveFleet(gameId, currentTurn, selectedSystem, systemId, 2).then((result) => { // Use dynamic gameId
+          if (result.success) {
+            setMovingFleets((prev) => [
+              ...prev,
+              { sourceId: selectedSystem, targetId: systemId, count: 2, progress: 0 },
+            ]);
+            setSelectedSystem(null);
+          }
         });
       }
     }
   };
 
-  // Scene with movement and rendering
   function GalaxyScene() {
     const { scene } = useThree();
 
-    useFrame(() => {
+    useFrame((state, delta) => {
       if (!cameraRef.current) return;
       const speed = 1.0;
       const direction = new THREE.Vector3();
@@ -102,6 +103,13 @@ export default function GalaxyMap({ map, players, currentTurn }: { map: { system
       if (moveState.current.right) direction.x = 1;
       direction.normalize().applyQuaternion(cameraRef.current.quaternion);
       cameraRef.current.position.add(direction.multiplyScalar(speed));
+
+      setMovingFleets((prev) =>
+        prev.map((fleet) => ({
+          ...fleet,
+          progress: Math.min(fleet.progress + delta * 0.5, 1),
+        })).filter((fleet) => fleet.progress < 1)
+      );
     });
 
     useEffect(() => {
@@ -173,6 +181,27 @@ export default function GalaxyMap({ map, players, currentTurn }: { map: { system
       );
     }
 
+    function MovingFleet({ sourceId, targetId, count, progress }: { sourceId: string; targetId: string; count: number; progress: number }) {
+      const sourcePos = map.systems.find((s) => s.id === sourceId)!.position;
+      const targetPos = map.systems.find((s) => s.id === targetId)!.position;
+      const position = [
+        THREE.MathUtils.lerp(sourcePos[0], targetPos[0], progress),
+        THREE.MathUtils.lerp(sourcePos[1], targetPos[1], progress),
+        THREE.MathUtils.lerp(sourcePos[2], targetPos[2], progress),
+      ] as [number, number, number];
+
+      return (
+        <group position={position}>
+          {Array.from({ length: count }, (_, i) => (
+            <mesh key={i} position={[Math.sin(i) * 0.5, Math.cos(i) * 0.5, 0]}>
+              <sphereGeometry args={[0.2, 16, 16]} />
+              <meshStandardMaterial color="white" emissive="white" emissiveIntensity={1} />
+            </mesh>
+          ))}
+        </group>
+      );
+    }
+
     return (
       <>
         <ambientLight intensity={0.3} />
@@ -195,6 +224,9 @@ export default function GalaxyMap({ map, players, currentTurn }: { map: { system
         {map.asteroids.map((asteroid) => (
           <Asteroid key={asteroid.id} position={asteroid.position} size={asteroid.size} />
         ))}
+        {movingFleets.map((fleet, i) => (
+          <MovingFleet key={i} sourceId={fleet.sourceId} targetId={fleet.targetId} count={fleet.count} progress={fleet.progress} />
+        ))}
       </>
     );
   }
@@ -210,7 +242,7 @@ export default function GalaxyMap({ map, players, currentTurn }: { map: { system
       >
         <GalaxyScene />
       </Canvas>
-      <div className="absolute top-1/2 left-1/2 w-4 h-4 bg-white rounded-full transform -translate-x-1/2 -translate-y-1/2 opacity-50 pointer-events-none" /> {/* Crosshair */}
+      <div className="absolute top-1/2 left-1/2 w-4 h-4 bg-white rounded-full transform -translate-x-1/2 -translate-y-1/2 opacity-50 pointer-events-none" />
       {selectedSystem && (
         <div className="absolute top-4 left-4 p-2 bg-gray-800 text-white rounded">
           Selected: {selectedSystem}
