@@ -92,6 +92,7 @@ export async function moveFleet(gameId: string, playerId: string, fromSystem: st
     if (!game || game.currentTurn !== playerId) {
       throw new Error("Not your turn or game not found");
     }
+    game._id = game._id.toString();
 
     const player = game.players.find((p) => p.id === playerId);
     const wormhole = game.map.wormholes.find(

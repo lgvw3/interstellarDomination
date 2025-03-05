@@ -5,7 +5,8 @@ import { Line, Sphere, Stars } from "@react-three/drei";
 import { Suspense, useRef, useEffect, useState } from "react";
 import * as THREE from "three";
 import { moveFleet } from "@/lib/actions";
-import { GameMap, MovingFleet, Player } from "@/lib/types";
+import { GameMap, MovingFleet, Planet, Player } from "@/lib/types";
+import { Line2, LineMaterial } from "three-stdlib";
 
 interface GalaxyMapProps {
   map: GameMap;
@@ -144,7 +145,7 @@ export default function GalaxyMap({ map, players, currentTurn, gameId }: GalaxyM
 
     function SolarSystem({
       position, sunSize, planets, id, owner, fleets,
-    }: { position: [number, number, number]; sunSize: number; planets: any[]; id: string; owner: string | null; fleets?: number }) {
+    }: { position: [number, number, number]; sunSize: number; planets: Planet[]; id: string; owner: string | null; fleets?: number }) {
       const ref = useRef<THREE.Group>(null!);
       return (
         <group ref={ref} position={position} userData={{ id }}>
@@ -164,11 +165,22 @@ export default function GalaxyMap({ map, players, currentTurn, gameId }: GalaxyM
       );
     }
 
+    interface ExtendedLineMaterial extends LineMaterial {
+      dashOffset: number;
+    }
+
     function Wormhole({ start, end }: { start: [number, number, number]; end: [number, number, number] }) {
-      const ref = useRef<THREE.Line>(null!);
+      const ref = useRef<Line2>(null!);
+
       useFrame(() => {
-        ref.current.material.dashOffset -= 0.05;
+        if (ref.current && ref.current.material) {
+          const material = ref.current.material as ExtendedLineMaterial;
+          if (material.dashOffset !== undefined) {
+            material.dashOffset -= 0.05;
+          }
+        }
       });
+
       return (
         <Line ref={ref} points={[start, end]} color="cyan" lineWidth={2} dashed dashSize={0.5} gapSize={0.5} />
       );
@@ -176,8 +188,7 @@ export default function GalaxyMap({ map, players, currentTurn, gameId }: GalaxyM
 
     function Asteroid({ position, size }: { position: [number, number, number]; size: number }) {
       const ref = useRef<THREE.Mesh>(null!);
-      useFrame((state) => {
-        const t = state.clock.getElapsedTime();
+      useFrame(() => {
         ref.current.rotation.x += 0.01;
         ref.current.rotation.y += 0.01;
       });
@@ -227,7 +238,7 @@ export default function GalaxyMap({ map, players, currentTurn, gameId }: GalaxyM
           />
         ))}
         {map.wormholes.map((wh, i) => (
-          <Wormhole key={i} start={map.systems.find((s) => s.id === wh.from).position} end={map.systems.find((s) => s.id === wh.to).position} />
+          <Wormhole key={i} start={map.systems.find((s) => s.id === wh.from)?.position ?? [0, 0, 0]} end={map.systems.find((s) => s.id === wh.to)?.position ?? [0, 0, 0]} />
         ))}
         {map.asteroids.map((asteroid) => (
           <Asteroid key={asteroid.id} position={asteroid.position} size={asteroid.size} />
@@ -244,8 +255,15 @@ export default function GalaxyMap({ map, players, currentTurn, gameId }: GalaxyM
       <Canvas
         camera={{ position: initialPosition, fov: 75, near: 1, far: 2000 }}
         onCreated={({ camera }) => {
-          cameraRef.current = camera;
-          if (homeSystem) camera.lookAt(homeSystem.position[0], homeSystem.position[1], homeSystem.position[2]);
+          const perspectiveCamera = camera as THREE.PerspectiveCamera;
+          cameraRef.current = perspectiveCamera;
+          if (homeSystem) {
+            perspectiveCamera.lookAt(
+              homeSystem.position[0],
+              homeSystem.position[1],
+              homeSystem.position[2]
+            );
+          }
         }}
       >
         <GalaxyScene />

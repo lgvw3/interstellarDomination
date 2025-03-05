@@ -57,7 +57,7 @@ export interface Player {
 
 // Game document in MongoDB
 export interface Game {
-  _id: ObjectId;
+  _id: ObjectId | string;
   players: Player[];
   map: GameMap;
   currentTurn: string;

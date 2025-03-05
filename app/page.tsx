@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { createGame } from "@/lib/actions";
 
 export default function Home() {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [players, setPlayers] = useState<string[]>(["Player1", "Player2"]);
   const router = useRouter();
 
